@@ -22,19 +22,9 @@ AC_BTN = 37
 SECURE_BTN = 31 
 PIR_SENSOR = 38
 DHTPIN = 11
-
-# Constants
-AC_POWER = 18000
-HEAT_POWER = 36000
-ELECTRICITY_COST = 0.5
-
-# Variables
-total_energy_consumed = 0
-total_cost = 0
 l_status = False	# Light status (depend on input from PIR) ,false when no person detected
 dw_status = True	# Door/window status (True for closed, False for open)
 dw_update = False	# Door/window status change displayed or not
-dw_msg = 'SAFE'     # Door/window status message (default is 'SAFE' for closed)
 hvac_update = False	# HVAC status change displayed or not
 hvac_msg = 'OFF '	# HVAC status (off by default, other two are AC and HEAT)
 terminated = False
@@ -42,6 +32,7 @@ humidity = None		# Humidity (Will be updated by CIMIS data)
 weather_index = 0		# current temperature (Will be updated by DHT)
 des_temp = 75		# desired temperature (75 degrees Farenheit by default)
 fname = 'log.txt'	# file name
+emergency_triggered = False
 
 # CIMIS URL Parameters
 appKey = '94c69e9a-5942-4315-9277-d758af3202ec'
@@ -72,14 +63,6 @@ except:
 lcd = Adafruit_CharLCD(pin_rs=0, pin_e=2, pins_db=[4,5,6,7], GPIO=mcp)
 mcp.output(3, 1) # Turns on lcd backlight
 lcd.begin(16, 2) # Set lcd mode
-
-# Update energy consumption and cost
-def update_energy_cost(power, duration):
-	global total_energy_consumed, total_cost
-	energy_consumed = (power * duration) / 1000 # Convert watt-seconds to kWh
-	total_energy_consumed += energy_consumed
-	total_cost = total_energy_consumed * ELECTRICITY_COST
-
 
 def get_hum(hr, curr):
 	global humidity
@@ -152,10 +135,6 @@ def check_temp():
 		time_str = time_str + ' HVAC ' + hvac_msg + '\n'
 		f.write(time_str)
 		f.close()
-	if (hvac_msg == 'AC  '):
-		update_energy_cost(AC_POWER, 1)
-	elif (hvac_msg == 'HEAT'):
-		update_energy_cost(HEAT_POWER, 1)
 		
 def hum_thread():
 	global humidity
@@ -240,14 +219,11 @@ def lcd_display():
 	global hvac_msg
 	global l_status
 	global lcd
-	global dw_msg
-
 	lcd.setCursor(0, 0)
 	lcd.message(str(weather_index)+'/'+str(des_temp))
 	lcd.message('   D:')
-
 	if(dw_status):
-		lcd.message(dw_msg)
+		lcd.message('SAFE \n')
 	else:
 		lcd.message('OPEN \n')
 	lcd.message('H:')
@@ -268,10 +244,8 @@ def lcd_thread(lock):
 	global des_temp
 	global l_status
 	global terminated
-	global dw_msg
-
-	old_hvac_msg = hvac_msg #new
-	old_total_cost = total_cost #new
+	global emergency_triggered
+	
 	old_status = l_status
 	old_des_t = des_temp
 	while(not terminated):
@@ -293,35 +267,33 @@ def lcd_thread(lock):
 			lcd.clear()
 			lcd.setCursor(0,0)
 			lcd.message('  HVAC ')
-			lcd.setCursor(0,1)
-			lcd.message('Total kWh: {:.2f}'.format(total_energy_consumed))
-			lcd.message('  Cost: {:.2f}'.format(total_cost))
+			lcd.message(hvac_msg)
 			hvac_update = False
 			time.sleep(3)
 			lcd.clear()
 		else:
 			lcd_display()
+
+		if weather_index > 95 and not emergency_triggered:
+			emergency_triggered = True
+
+            # Perform emergency actions: open door/window, turn off HVAC, flash lights, display emergency message
+		if weather_index <= 95 and emergency_triggered:
+			emergency_triggered = False
+
 			time.sleep(0.1)
 	print('[Main] LCD Thread terminated')
 
-def display_warning():
-    lcd.clear()
-    lcd.message('DOOR/WINDOW OPEN!\n')
-    lcd.message('HVAC OFF')
-    time.sleep(3)
-    lcd.clear()
-    
 def handle(pin):
 	global des_temp
 	global dw_status
 	global dw_update
 	global fname
-
 	if(pin == SECURE_BTN):
 		dw_status = not dw_status
 		if(dw_status):
+			#ADD HVAC turns off
 			print('[Main] Door/window closed')
-			dw_msg = 'SAFE'  # Update the door/window status message
 			f = open(fname, 'a+')
 			time_str = datetime.now().strftime('%H:%M:%S')
 			time_str = time_str + ' DOOR/WINDOW SAFE\n'
@@ -329,7 +301,6 @@ def handle(pin):
 			f.close()
 		else:
 			print('[Main] Door/window open')
-			dw_msg = 'OPEN'  # Update the door/window status message
 			f = open(fname, 'a+')
 			time_str = datetime.now().strftime('%H:%M:%S')
 			time_str = time_str + ' DOOR/WINDOW OPEN\n'
@@ -342,7 +313,6 @@ def handle(pin):
 	elif(pin == HEAT_BTN):
 		if(des_temp < 95):
 			des_temp += 1
-
 
 # Button events detection
 GPIO.add_event_detect(SECURE_BTN, GPIO.RISING, callback=handle, bouncetime=300)
@@ -392,4 +362,3 @@ if __name__ == '__main__':
 		lcd.clear()
 		GPIO.cleanup()
 		print('END')
-
