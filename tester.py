@@ -14,6 +14,11 @@ import Freenove_DHT as DHT
 GPIO.setwarnings(False)		
 GPIO.setmode(GPIO.BOARD)
 
+# Constants
+AC_POWER = 18000
+HEAT_POWER = 36000
+ELECTRICITY_COST = 0.5
+
 LED_G = 40
 LED_R = 32 
 LED_B = 33
@@ -22,6 +27,10 @@ AC_BTN = 37
 SECURE_BTN = 31 
 PIR_SENSOR = 38
 DHTPIN = 11
+
+# Variables
+total_energy_consumed = 0
+total_cost = 0
 l_status = False	# Light status (depend on input from PIR) ,false when no person detected
 dw_status = True	# Door/window status (True for closed, False for open)
 dw_update = False	# Door/window status change displayed or not
@@ -63,6 +72,12 @@ except:
 lcd = Adafruit_CharLCD(pin_rs=0, pin_e=2, pins_db=[4,5,6,7], GPIO=mcp)
 mcp.output(3, 1) # Turns on lcd backlight
 lcd.begin(16, 2) # Set lcd mode
+
+def update_energy_cost(power, duration):
+	global total_energy_consumed, total_cost
+	energy_consumed = (power * duration) / 1000
+	total_energy_consumed += energy_consumed
+	total_cost = total_energy_consumed * ELECTRICITY_COST
 
 def get_hum(hr, curr):
 	global humidity
@@ -135,7 +150,11 @@ def check_temp():
 		time_str = time_str + ' HVAC ' + hvac_msg + '\n'
 		f.write(time_str)
 		f.close()
-		
+	if(hvac_msg == 'AC  '):
+		update_energy_cost(AC_POWER, 1)
+	if(hvac_msg == 'HEAT'):
+		update_energy_cost(HEAT_POWER, 1)
+
 def hum_thread():
 	global humidity
 	global terminated
@@ -248,6 +267,8 @@ def lcd_thread(lock):
 	
 	old_status = l_status
 	old_des_t = des_temp
+	old_hvac_msg = hvac_msg
+	old_total_cost = total_cost
 	while(not terminated):
 		check_temp()
 		if(dw_update):
@@ -268,6 +289,9 @@ def lcd_thread(lock):
 			lcd.setCursor(0,0)
 			lcd.message('  HVAC ')
 			lcd.message(hvac_msg)
+			lcd.setCursor(0,1)
+			lcd.message('Total kWh: {:.2f}'.format(total_energy_consumed))
+			lcd.message('  Cost: ${:.2f}'.format(total_cost))
 			hvac_update = False
 			time.sleep(3)
 			lcd.clear()
